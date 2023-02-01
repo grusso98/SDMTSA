@@ -1,0 +1,427 @@
+---
+title: "progetto"
+output: html_document
+date: '2022-12-05'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##INIZIO
+
+```{r}
+energy <- read.csv("data2022_train.csv")
+energy[0:10,]
+```
+##Rename colonne e trasformazione as.date
+```{r}
+`colnames<-`(energy, c("date", "power"))
+```
+```{r}
+library(forecast)
+library(timeDate)
+library(xts)
+energy$X <- as.timeDate(energy$X)
+energy_ts<- xts(energy$y, energy$X)
+```
+
+```{r}
+plot(energy_ts)
+```
+
+
+##Plot time series e analisi grafiche
+plot da giugno a settembre(estate)
+```{r}
+plot(energy_ts["2017-04-01/2017-08-01"], type="l", )
+```
+```{r}
+plot(energy_ts["2017-04-01/2017-08-01"], type="l", )
+```
+
+Invernale
+```{r}
+plot(energy_ts["2017-04-20/2017-04-21"], type="l")
+```
+
+
+```{r}
+med <- tapply(energy_ts[,1], rep(1:334, each = 144), mean)
+sd <- tapply(energy_ts[,1], rep(1:334, each = 144), sd)
+plot(med,sd)
+```
+Rimuovendo l'outlier in alto a sinistra, si ha una discreta dipendenza lineare, meglio usare log().
+```{r}
+plot(log(energy_ts))
+```
+
+##stagionalità
+differenza giornaliera
+```{r}
+plot(diff(log(energy_ts), 144), type='l')
+```
+
+differenza settimanale
+```{r}
+plot(diff(energy_ts, 1008))
+```
+
+##acf/pacf
+```{r}
+library(forecast)
+Acf(diff(energy_train,144), lag.max = 2016)
+```
+```{r}
+Pacf(energy_train, lag.max = 2016)
+```
+##arima
+
+```{r}
+test <- read.csv("dicembre_test_set.csv")
+test
+```
+
+costruiamo train e test:
+```{r}
+energy_train <- log(energy_ts["2017-09-01/2017-10-31"])
+energy_test <- energy_ts["2017-11-01/2017-11-30"]
+```
+
+E sinusoidi:
+```{r}
+# 10 sinusoidi per modellare la stagionalità giornaliera
+
+vj <- c(1,2,3,4,5,6,8,9,10)
+vt <- 1:(nrow(energy_train)+length(energy_test))
+
+s_daily <- 24*6
+
+freqt_daily <- outer(vt,vj)*2*pi/s_daily
+co_daily <- cos(freqt_daily)
+si_daily <- sin(freqt_daily)
+colnames(co_daily) <- paste0("cosd",vj)
+colnames(si_daily) <- paste0("sind",vj)
+
+sinusoids_daily <- cbind(co_daily,
+                         si_daily)
+sinusoids_daily
+
+
+# 10 sinusoidi per modellare la stagionalità settimanale
+
+s_weekly <- 24*6*7
+
+freqt_weekly <- outer(vt,vj)*2*pi/s_weekly
+co_weekly <- cos(freqt_weekly)
+si_weekly <- sin(freqt_weekly)
+colnames(co_weekly) <- paste0("cosw",vj)
+colnames(si_weekly) <- paste0("sinw",vj)
+
+sinusoids_weekly <- cbind(co_weekly,
+                          si_weekly)
+sinusoids_weekly
+```
+
+Er modello:
+```{r}
+mod1 <- Arima(y = energy_train, 
+              order=c(3,0,0), 
+              seasonal= list(order=c(0,1,0), period=144),
+              lambda=0,
+              xreg = sinusoids_weekly[1:(length(energy_train)),],
+              method='CSS'
+              )
+```
+
+
+```{r}
+summary(mod1)
+```
+
+```{r}
+autoplot(fitted(mod1,h=1))
+```
+
+
+```{r}
+pre1 <- forecast(mod1, 
+                 xreg=sinusoids_weekly[(length(energy_train)+1):(length(energy_train)+length(energy_test)),]
+                 )
+```
+
+
+```{r}
+stime_arima <-  as.vector(exp(pre1$mean))#, order.by = index(energy_test))
+```
+
+
+```{r}
+plot(energy_test, type="l")
+lines(stime_arima, type="l", col="red")
+```
+```{r}
+plot(energy_test, type="l")
+```
+
+```{r}
+mae1<- mean(abs(stime_arima-energy_test))
+mae1
+```
+
+
+```{r}
+plot(mod1$residuals)
+```
+```{r}
+Acf(mod1$residuals, lag.max = 1000)
+Pacf(mod1$residuals, lag.max = 1000)
+```
+
+##autoarima
+```{r}
+energy_train <- energy_ts["2017-09-01/2017-10-31"]
+energy_test <- energy_ts["2017-11-01/2017-11-30"]
+```
+
+```{r}
+auto <- auto.arima(energy_train, 
+                   xreg=sinusoids_weekly[1:length(energy_train),],
+                   #D=1,
+                   #d=0,
+                   lambda = "auto",
+                   method='CSS')
+```
+
+```{r}
+auto
+```
+
+```{r}
+pre1 <- forecast(auto, 
+                 xreg=sinusoids_weekly[((length(energy_train))+1):(length(energy_train)+length(energy_test)),],
+                 h=4032,
+                 method='CSS')
+```
+
+```{r}
+Acf(auto$residuals, lag.max = 1000)
+Pacf(auto$residuals, lag.max=1000)
+```
+
+```{r}
+library(xts)
+pre_mean1 <- xts(pre1$mean,
+                order.by = index(energy_test))
+```
+
+
+```{r}
+auto_mae<- mean(abs(pre_mean1-energy_test))
+auto_mae
+```
+
+```{r}
+length(pre1)
+```
+
+```{r}
+plot(energy_test)
+lines(pre_mean1, col="red")
+```
+
+##UCM
+```{r}
+ucm <- energy_ts["2017-09-01/"]
+```
+```{r}
+index_final_ucm <- c(index(ucm), (index(ucm["2017-11-01/"])+24*6*30*60*10))
+val_ucm <- c(as.vector(ucm), rep(NA, 24*6*30))
+final_ucm <- xts(val_ucm, index_final_ucm)
+```
+
+```{r}
+l_ucm<-log(final_ucm)
+```
+```{r}
+plot(l_ucm, type='l')
+```
+
+```{r}
+library(KFAS)
+
+mod1 <- SSModel(
+  l_ucm~SSMtrend(2, list(NA,NA))+SSMseasonal(144, NA, "trigonometric", harmonics=1:10) #pela consiglia tra 10 e 20 sinusoidi
+      +SSMseasonal(1008, NA, "trigonometric", harmonics=1:10),
+              H=NA
+  )
+```
+
+
+```{r}
+mod1$P1inf[] <- 0 #leva gli infiniti dalle varianze
+mod1$a1[1] <- mean(log(energy_ts["2017-09-01/2017-09-31"])) #valore atteso del vettore di stato al tempo 1
+```
+
+```{r}
+vy<-var(l_ucm, na.rm = TRUE)
+diag(mod1$P1) <-vy*10 #matrice covarianza del vettore di stato al tempo 1 
+```
+
+```{r}
+pars <- log(c(
+  logVarEta = vy/10, 
+  logVarZeta = vy/10000, #slope
+  logVarOm1 = vy/1000,#stag giornaliera 
+  logVarOm7 = vy/10000, #stag settimanale
+  logVarEps = vy/10 #white noise
+))
+```
+
+```{r}
+updt1 <- function(pars, model){
+  nq <-nrow(model$Q[,,1])
+  model$Q[1,1,1] <- exp(pars[1])
+  model$Q[2,2,1] <- exp(pars[2])
+  
+  
+  diag(model$Q[3:34,3:34,1]) <- exp(pars[3]) #2+num_harmonics*2
+  diag(model$Q[35:nq,35:nq,1]) <- exp(pars[4])
+  
+  model$H[1,1,1] <- exp(pars[5])
+  model
+}
+```
+
+```{r}
+fit1 <- fitSSM(mod1, pars, updt1)
+fit1$optim.out
+```
+
+```{r}
+library(xts)
+kfs1 <- KFS(fit1$model, smoothing = c("state", "signal", "disturbance"),
+            filtering = c("state", "signal"))
+
+```
+
+```{r}
+res <- rstandard(kfs1, type = "state")
+Acf(res, lag.max = 1009)
+Pacf(res, lag.max=1009)
+```
+
+```{r}
+length(l_ucm)
+length(alphahat[,"level"])
+```
+
+```{r}
+est <- xts(kfs1$muhat[,1], index(l_ucm))
+```
+
+```{r}
+alphahat <- as.vector(kfs1$alphahat[,"level"])
+plot(as.vector(energy_test), col="blue", type="l")
+plot(exp(est["2017-12-01/"]), col="red")
+```
+```{r}
+plot(energy_ts["2017-11-01/"], col="blue")
+lines(exp(alphahat), lwd=3, col="red")
+```
+
+```{r}
+maeSSM1<- mean(abs(energy_test-exp(est["2017-12-01/"])))
+maeSSM1
+```
+
+```{r}
+stime_ucm <- as.vector(exp(est["2017-12-01/"]))
+```
+
+##ML:RF 1-step ahead
+
+```{r}
+ml_data <- energy_ts["2017-09-01/"]
+#ml_data["2017-11-01/"]<-NA
+l_ml<-log(ml_data)
+```
+
+```{r}
+# modello RF sui livelli finestra 7 giorni
+train_ndx <- 1:(8065-1008) #stagionalità a 7 giorni, senza differenze 
+test_ndx <- (8065-1008+1):(nrow(l_ml)-1008) #prendi i restanti dati fino a -7 dalla fine
+X <- embed(l_ml, 1008+1)
+y <- X[, 1]
+X <- cbind(X[, -1],
+           l_ml[-(1:1008)])
+
+y_train <- y[train_ndx]
+X_train <- X[train_ndx, ]
+
+y_test <- y[test_ndx]
+X_test <- X[test_ndx,]
+```
+
+```{r}
+library(randomForest)
+set.seed(20221202)
+rf1 <- randomForest(X_train, y_train, #altro modo di istanziare un modello ML
+                    xtest = X_test,
+                    ytest = y_test)
+
+rf_pred1 <- rf1$test$predicted
+
+plot(y_test, type = "l")
+lines(rf_pred1, col = "red")
+
+loss <- data.frame(type = c("RMSE", "MAE"),
+                   RF1 = c(sqrt(mean((exp(y_test) - exp(rf_pred1))^2)),
+                           mean(abs(exp(y_test) - exp(rf_pred1))))
+)
+```
+
+```{r}
+loss_7d_wind<-loss
+```
+
+
+
+```{r}
+# modello RF sui livelli finestra giornaliera
+train_ndx <- 1:(8065-144) #stagionalità a 7 giorni, senza differenze 
+test_ndx <- (8065-144+1):(nrow(l_ml)-144) #prendi i restanti dati fino a -7 dalla fine
+X <- embed(l_ml, 144+1)
+y <- X[, 1]
+X <- cbind(X[, -1],
+           l_ml[-(1:144)])
+
+y_train <- y[train_ndx]
+X_train <- X[train_ndx, ]
+
+y_test <- y[test_ndx]
+X_test <- X[test_ndx,]
+```
+
+```{r}
+library(randomForest)
+set.seed(20221202)
+rf1 <- randomForest(X_train, y_train, #altro modo di istanziare un modello ML
+                    xtest = X_test,
+                    ytest = y_test)
+
+rf_pred1 <- rf1$test$predicted
+
+plot(y_test, type = "l")
+lines(rf_pred1, col = "red")
+
+loss <- data.frame(type = c("RMSE", "MAE"),
+                   RF1 = c(sqrt(mean((exp(y_test) - exp(rf_pred1))^2)),
+                           mean(abs(exp(y_test) - exp(rf_pred1))))
+)
+```
+
+```{r}
+loss_1d_wind<-loss
+loss_1d_wind
+```
