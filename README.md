@@ -4,5 +4,6 @@ Energy consumption forecast using ARIMA, UCM and LSTM. Part of Streaming data ma
 ## Files
 * R markdown contains the R code for ARIMA and UCM models.
 * LSTM contains the python implementation of LSTMs.
+* Report contains a summary of the work done and the obtained results (italian).
 
-Report contains a summary of the work done and the obtained results.
+
