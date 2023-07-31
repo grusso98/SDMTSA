@@ -1,3 +1,4 @@
+![alt text](https://github.com/grusso98/SDMTSA/blob/main/img/TS-banner.png)
 # Energy Consumption Forecast 
 ## Streaming Data Management and Time Series Analysis
 Energy consumption forecast using ARIMA, UCM and LSTM. Part of Streaming data management and time series analysis exam, Data Science Msc @ University of Milan Bicocca
